@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # Координатор ClickHouse Keeper
+  keeper:
+    image: clickhouse/clickhouse-keeper:24.8-alpine
+    container_name: ch-keeper
+    ports:
+      - "9181:9181"
+    environment:
+      - KEEPER_SERVER_ID=1
+
+  # Реплика 1
+  node1:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: ch-node1
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    depends_on:
+      - keeper
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # Реплика 2
+  node2:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: ch-node2
+    ports:
+      - "9001:9000"
+      - "8124:8123"
+    depends_on:
+      - keeper
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # Наш платформенный сервис Control Plane & Dashboard
+  platform:
+    build: .
+    container_name: ch-platform
+    ports:
+      - "8080:8080"
+    depends_on:
+      - node1
+      - node2
+    network_mode: "host"
