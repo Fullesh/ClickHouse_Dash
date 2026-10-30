@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Управление кластером ClickHouse</title>
+    <style>
+        :root {
+            --bg-page: #f5f4f2;
+            --bg-surface: #ffffff;
+            --bg-control: #f0efed;
+            --bg-control-hover: #e7e5e2;
+            --text-primary: #21201f;
+            --text-secondary: #7a7a7a;
+            --line: #e6e4e1;
+            --line-strong: #cfccc8;
+            --online-bg: #e6f4ea;
+            --online-text: #137333;
+            --offline-bg: #ffe0db;
+            --offline-text: #d42a0c;
+            --radius-s: 6px;
+            --radius-m: 10px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: var(--font);
+            font-size: 13px;
+            line-height: 1.45;
+            color: var(--text-primary);
+            background-color: var(--bg-page);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .layout {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.2px;
+        }
+
+        .header-sub {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+
+        .header-status {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            background: var(--bg-surface);
+            border: 1px solid var(--line);
+            padding: 4px 10px;
+            border-radius: var(--radius-s);
+            color: var(--text-secondary);
+        }
+
+        .section-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        /* Топология кластера */
+        .topology-canvas {
+            background: var(--bg-surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-m);
+            padding: 24px;
+            margin-bottom: 32px;
+            position: relative;
+        }
+
+        .canvas-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .canvas-scheme {
+            position: relative;
+            padding: 10px 0 20px;
+        }
+
+        /* SVG слой со стрелками */
+        .topology-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .topology-level {
+            display: flex;
+            justify-content: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        .topology-level--nodes {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-top: 70px;
+            flex-wrap: wrap;
+        }
+
+        /* Карточка оборудования (серверный юнит из PTracker) */
+        .unit-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--line-strong);
+            border-radius: var(--radius-s);
+            padding: 14px 16px;
+            width: 280px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        .unit-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .unit-card--keeper {
+            width: 320px;
+            border-color: #0077ff;
+            background: #fafcff;
+        }
+
+        .unit-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .unit-title-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .unit-icon {
+            width: 18px;
+            height: 18px;
+            stroke: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .unit-card--keeper .unit-icon {
+            stroke: #0077ff;
+        }
+
+        .unit-name {
+            font-weight: 700;
+            font-size: 13.5px;
+            letter-spacing: -0.1px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 10.5px;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .status-badge--online {
+            background: var(--online-bg);
+            color: var(--online-text);
+        }
+
+        .status-badge--online::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #137333;
+        }
+
+        .status-badge--offline {
+            background: var(--offline-bg);
+            color: var(--offline-text);
+        }
+
+        .status-badge--offline::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #d42a0c;
+        }
+
+        .status-badge--warning {
+            background: #fef9c3;
+            color: #854d0e;
+        }
+
+        .status-badge--warning::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #ca8a04;
+        }
+
+        .unit-alert {
+            margin-top: 6px;
+            padding: 6px 8px;
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 4px;
+            font-size: 11px;
+            line-height: 1.4;
+            color: #92400e;
+            font-family: var(--font-mono);
+        }
+
+        .unit-alert-label {
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 10px;
+        }
+
+        .unit-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            padding-top: 4px;
+            border-top: 1px solid var(--line);
+        }
+
+        .unit-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .unit-ip {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-primary);
+            background: var(--bg-control);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .unit-error {
+            font-size: 11px;
+            font-family: var(--font-mono);
+            color: var(--offline-text);
+            margin-top: 2px;
+            padding: 4px 6px;
+            background: var(--offline-bg);
+            border-radius: 4px;
+            word-break: break-all;
+        }
+
+        /* Сценарии сбоев */
+        .scenarios-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+            gap: 16px;
+        }
+
+        .scenario-box {
+            background: var(--bg-surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-m);
+            padding: 16px 18px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .scenario-name {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .scenario-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            line-height: 1.45;
+        }
+
+        .scenario-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid var(--line);
+        }
+
+        .btn {
+            font-family: inherit;
+            border: 1px solid var(--line);
+            background: var(--bg-control);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            border-radius: var(--radius-s);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+        }
+
+        .btn:hover { background: var(--bg-control-hover); }
+
+        .btn-danger {
+            background: #fff0f0;
+            border-color: #fcdad7;
+            color: #d42a0c;
+            font-weight: 600;
+        }
+
+        .btn-danger:hover {
+            background: #ffe4e1;
+        }
+
+        .btn-primary {
+            background: #21201f;
+            border-color: #21201f;
+            color: #ffffff;
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: #383635;
+            border-color: #383635;
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+        }
+
+        .form-input, .form-select {
+            width: 100%;
+            padding: 8px 10px;
+            background: var(--bg-surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-s);
+            font-family: inherit;
+            font-size: 12.5px;
+            color: var(--text-primary);
+            box-sizing: border-box;
+        }
+
+        .form-input:focus, .form-select:focus {
+            outline: none;
+            border-color: #0077ff;
+        }
+
+        .form-hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .btn-link {
+            border: none;
+            background: none;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .btn-link:hover { color: var(--text-primary); }
+
+        .unit-btn-remove {
+            background: none;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            font-size: 15px;
+            line-height: 1;
+            padding: 1px 5px;
+            border-radius: var(--radius-s);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .unit-btn-remove:hover {
+            color: #d42a0c;
+            background: #ffe0db;
+            border-color: #fcdad7;
+        }
+
+        /* Диалоговое окно анализа */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.4);
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .modal-dialog {
+            background: var(--bg-surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-m);
+            width: 100%;
+            max-width: 540px;
+            box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .modal-header h3 {
+            font-size: 13.5px;
+            font-weight: 700;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 0 4px;
+        }
+
+        .modal-body {
+            padding: 18px;
+            font-size: 12.5px;
+            line-height: 1.6;
+            color: var(--text-primary);
+        }
+
+        .modal-body code {
+            font-family: var(--font-mono);
+            font-size: 11.5px;
+            background: var(--bg-control);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        .modal-footer {
+            padding: 10px 18px;
+            background: var(--bg-page);
+            border-top: 1px solid var(--line);
+            display: flex;
+            justify-content: flex-end;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="layout">
+        <header class="header">
+            <div>
+                <div class="header-title">ClickHouse Cluster Management</div>
+                <div class="header-sub">Топология кластера и координация репликации</div>
+            </div>
+            <div class="header-status" id="pollTimer">Опрос: 1000мс</div>
+        </header>
+
+        <!-- Секция топологии -->
+        <div class="section-label">Схема оборудования и соединений</div>
+        <div class="topology-canvas">
+            <div class="canvas-toolbar">
+                <span>Протокол координации: Raft (TCP 9181)</span>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span>Кластер: company_cluster</span>
+                    <button class="btn btn-primary" onclick="openProvisionModal()" style="padding: 3px 10px; font-size: 11px; text-transform: none; letter-spacing: 0;">+ Добавить узел</button>
+                </div>
+            </div>
+
+            <div class="canvas-scheme" id="schemeContainer">
+                <!-- SVG со стрелками (динамически рассчитывается между элементами) -->
+                <svg class="topology-svg" id="topologySvg">
+                    <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#7a7a7a"/>
+                        </marker>
+                    </defs>
+                    <g id="svgLines"></g>
+                </svg>
+
+                <!-- Верхний уровень: Координатор Keeper -->
+                <div class="topology-level">
+                    <div id="keeperSlot"></div>
+                </div>
+
+                <!-- Нижний уровень: Серверные ноды репликации -->
+                <div class="topology-level--nodes" id="replicasSlot"></div>
+            </div>
+        </div>
+
+        <!-- Секция аварийных сценариев -->
+        <div class="section-label">Сценарии отказов и диагностика</div>
+        <div class="scenarios-grid">
+            <div class="scenario-box">
+                <div>
+                    <div class="scenario-name">Отказ координатора (Keeper)</div>
+                    <div class="scenario-text">Сетевая изоляция Keeper через iptables DROP на порту 9181. Проверка перехода реплик в readonly.</div>
+                </div>
+                <div class="scenario-foot">
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn btn-danger" onclick="triggerAction('isolate-keeper')">Изолировать сеть</button>
+                        <button class="btn" onclick="triggerAction('restore-keeper')">Восстановить</button>
+                    </div>
+                    <button class="btn-link" onclick="showInfo('keeper')">Разбор поведения</button>
+                </div>
+            </div>
+
+            <div class="scenario-box">
+                <div>
+                    <div class="scenario-name">Изоляция реплики (Node 2)</div>
+                    <div class="scenario-text">Остановка процесса второй ноды (pkill -9). Проверка непрерывности записи в node1 и накопления очереди.</div>
+                </div>
+                <div class="scenario-foot">
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn btn-danger" onclick="triggerAction('kill-node2')">Погасить ноду</button>
+                        <button class="btn" onclick="triggerAction('restore-node2')">Поднять ноду</button>
+                    </div>
+                    <button class="btn-link" onclick="showInfo('replica')">Разбор поведения</button>
+                </div>
+            </div>
+
+            <div class="scenario-box">
+                <div>
+                    <div class="scenario-name">Серый отказ / Зависание ядра (Gray Failure)</div>
+                    <div class="scenario-text">Сигнал SIGSTOP ноде node1. Имитация дедлока или зависания I/O без закрытия сетевого сокета.</div>
+                </div>
+                <div class="scenario-foot">
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn btn-danger" onclick="triggerAction('freeze-node1')">Заморозить ноду</button>
+                        <button class="btn" onclick="triggerAction('unfreeze-node1')">Разморозить ноду</button>
+                    </div>
+                    <button class="btn-link" onclick="showInfo('freeze')">Разбор поведения</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно -->
+    <div class="modal-overlay" id="infoModal">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3 id="infoTitle">Технический разбор</h3>
+                <button class="modal-close" onclick="closeInfo()">&times;</button>
+            </div>
+            <div class="modal-body" id="infoBody"></div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeInfo()">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно провижининга узла -->
+    <div class="modal-overlay" id="provisionModal">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3>Подключение нового узла в кластер</h3>
+                <button class="modal-close" onclick="closeProvisionModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Идентификатор узла (ID)</label>
+                    <input type="text" id="provId" class="form-input" placeholder="например: node3" value="node3">
+                    <div class="form-hint">Уникальный ID в топологии кластера</div>
+                </div>
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label class="form-label">Сетевой адрес (Host)</label>
+                        <input type="text" id="provHost" class="form-input" value="127.0.0.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Порт (TCP Native)</label>
+                        <input type="number" id="provPort" class="form-input" value="9002">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Роль в кластере</label>
+                    <select id="provRole" class="form-select">
+                        <option value="REPLICA" selected>REPLICA (Данные и вычисления)</option>
+                        <option value="KEEPER">KEEPER (Координатор Raft)</option>
+                    </select>
+                </div>
+                <div id="provError" style="display: none; margin-top: 10px; padding: 8px; background: #fff0f0; border: 1px solid #fcdad7; border-radius: var(--radius-s); color: #d42a0c; font-size: 11.5px;"></div>
+            </div>
+            <div class="modal-footer" style="gap: 8px;">
+                <button class="btn" onclick="closeProvisionModal()">Отмена</button>
+                <button class="btn btn-primary" onclick="submitProvision()">Зарегистрировать узел</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Иконка серверной стойки (из PTracker constructor.html)
+        const SERVER_ICON = `
+            <svg class="unit-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round">
+                <path d="M4 3h16v7H4z M4 14h16v7H4z M8 6.5h.01 M8 17.5h.01"/>
+            </svg>
+        `;
+
+        const descriptions = {
+            keeper: `
+                <strong>Механика поведения при отказе Keeper:</strong><br><br>
+                1. <strong>Защита от расхождения данных:</strong> Все таблицы семейства <code>ReplicatedMergeTree</code> мгновенно переходят в статус <code>readonly</code>.<br>
+                2. <strong>Чтение:</strong> Запросы <code>SELECT</code> продолжают выполняться штатно с локальных файлов на диске.<br>
+                3. <strong>Запись:</strong> Запросы <code>INSERT</code> блокируются до восстановления кворума Raft.<br>
+                4. <strong>Автовосстановление:</strong> После перезапуска Keeper фоновый поток <code>ReplicatedMergeTreeRestartingThread</code> восстанавливает сессию без ручного вмешательства.
+            `,
+            replica: `
+                <strong>Механика поведения при падении реплики:</strong><br><br>
+                1. <strong>Multi-Master:</strong> Кластер ClickHouse не имеет выделенного мастера. Запись продолжается во вторую ноду без простоя (Zero Downtime).<br>
+                2. <strong>Очередь репликации:</strong> В таблице <code>system.replicas</code> на активной ноде растет счетчик <code>queue_size</code>.<br>
+                3. <strong>Догоняющая синхронизация:</strong> После подъема ноды недостающие куски (parts) автоматически скачиваются через <code>interserver_http_port</code>.
+            `,
+            freeze: `
+                <strong>Механика Gray Failure (зависания процесса):</strong><br><br>
+                1. <strong>В чем коварство:</strong> При падении процесса (<code>SIGKILL</code>) ядро ОС мгновенно шлет <code>TCP RST/FIN</code>. Балансировщики сразу видят сбой и уводят трафик.<br>
+                2. <strong>Поведение при SIGSTOP:</strong> Процесс замирает, но сокет в ядре Linux остается открытым. Клиентские приложения шлют запросы и зависают в ожидании до истечения read-таймаута.<br>
+                3. <strong>Каскадная деградация:</strong> Зависшие соединения забивают пулы подключений (connection pool exhaustion) на стороне микросервисов, парализуя соседние системы.<br>
+                4. <strong>Реакция мониторинга:</strong> Честный протокольный ping выявляет отсутствие ответа по таймауту и помечает ноду желтым статусом <code>DEGRADED (WARNING)</code>.
+            `
+        };
+
+        function showInfo(key) {
+            const titles = {
+                keeper: 'Анализ: Отказ координатора ClickHouse Keeper',
+                replica: 'Анализ: Изоляция реплики данных',
+                freeze: 'Анализ: Серый отказ узла (Gray Failure / SIGSTOP)'
+            };
+            document.getElementById('infoTitle').innerText = titles[key];
+            document.getElementById('infoBody').innerHTML = descriptions[key];
+            document.getElementById('infoModal').style.display = 'flex';
+        }
+
+        function closeInfo() {
+            document.getElementById('infoModal').style.display = 'none';
+        }
+
+        function openProvisionModal() {
+            document.getElementById('provError').style.display = 'none';
+            document.getElementById('provisionModal').style.display = 'flex';
+        }
+
+        function closeProvisionModal() {
+            document.getElementById('provisionModal').style.display = 'none';
+        }
+
+        async function submitProvision() {
+            const id = document.getElementById('provId').value.trim();
+            const host = document.getElementById('provHost').value.trim();
+            const port = parseInt(document.getElementById('provPort').value, 10);
+            const role = document.getElementById('provRole').value;
+            const errEl = document.getElementById('provError');
+
+            if (!id || !host || isNaN(port)) {
+                errEl.innerText = 'Заполните все обязательные поля';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/v1/nodes/provision', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, host, port, role })
+                });
+
+                const data = await res.json();
+                if (!res.ok) {
+                    errEl.innerText = data.message || 'Ошибка регистрации узла';
+                    errEl.style.display = 'block';
+                    return;
+                }
+
+                closeProvisionModal();
+                fetchTopology();
+            } catch (err) {
+                errEl.innerText = 'Сетевой сбой: ' + err.message;
+                errEl.style.display = 'block';
+            }
+        }
+
+        window.onclick = function(e) {
+            if (e.target === document.getElementById('infoModal')) closeInfo();
+            if (e.target === document.getElementById('provisionModal')) closeProvisionModal();
+        };
+
+        async function triggerAction(action) {
+            try {
+                await fetch('/api/v1/chaos/trigger?action=' + action, { method: 'POST' });
+                fetchTopology();
+            } catch (err) {
+                console.error('Сетевой сбой при вызове Chaos Action:', err);
+            }
+        }
+
+        function createCard(node) {
+            const isKeeper = node.role === 'KEEPER';
+            const isOnline = node.status === 'HEALTHY';
+            const isWarning = node.status === 'WARNING';
+
+            let statusClass = 'status-badge--online';
+            let statusText = 'ONLINE';
+
+            if (isWarning) {
+                statusClass = 'status-badge--warning';
+                statusText = 'DEGRADED';
+            } else if (!isOnline) {
+                statusClass = 'status-badge--offline';
+                statusText = 'OFFLINE';
+            }
+
+            const cardClass = isKeeper ? 'unit-card unit-card--keeper' : 'unit-card';
+
+            return `
+                <div class="${cardClass}" id="card-${node.id}">
+                    <div class="unit-top">
+                        <div class="unit-title-group">
+                            ${SERVER_ICON}
+                            <span class="unit-name">${node.id}</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <span class="status-badge ${statusClass}">${statusText}</span>
+                            ${!isKeeper ? `<button class="unit-btn-remove" onclick="deleteNode('${node.id}')" title="Удалить узел">&times;</button>` : ''}
+                        </div>
+                    </div>
+                    <div class="unit-meta">
+                        <div class="unit-row">
+                            <span>Роль</span>
+                            <span style="font-weight: 600;">${node.role}</span>
+                        </div>
+                        <div class="unit-row">
+                            <span>Сетевой адрес</span>
+                            <span class="unit-ip">${node.host}:${node.port}</span>
+                        </div>
+                        <div class="unit-row">
+                            <span>Задержка сети</span>
+                            <span style="font-family: var(--font-mono); font-weight: 600;">${isOnline ? node.latency.toFixed(2) + ' мс' : '—'}</span>
+                        </div>
+                    </div>
+                    ${node.activeAlert ? `
+                        <div class="unit-alert">
+                            <span class="unit-alert-label">Инцидент:</span> ${node.activeAlert}
+                        </div>
+                    ` : ''}
+                    ${node.lastError && !node.activeAlert ? `<div class="unit-error">${node.lastError}</div>` : ''}
+                </div>
+            `;
+        }
+
+        async function deleteNode(nodeId) {
+            if (!confirm(`Удалить узел "${nodeId}" из топологии кластера?`)) return;
+            try {
+                const res = await fetch('/api/v1/nodes/delete?id=' + encodeURIComponent(nodeId), { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) {
+                    alert(data.message || 'Ошибка удаления узла');
+                    return;
+                }
+                fetchTopology();
+            } catch (err) {
+                alert('Сетевой сбой при удалении: ' + err.message);
+            }
+        }
+
+        function drawConnections() {
+            const keeperEl = document.getElementById('card-keeper');
+            const svgLines = document.getElementById('svgLines');
+            const schemeContainer = document.getElementById('schemeContainer');
+
+            if (!keeperEl || !schemeContainer) return;
+
+            const schemeRect = schemeContainer.getBoundingClientRect();
+            const keeperRect = keeperEl.getBoundingClientRect();
+
+            const kX = (keeperRect.left + keeperRect.width / 2) - schemeRect.left;
+            const kY = keeperRect.bottom - schemeRect.top;
+
+            let linesHTML = '';
+            const replicaCards = document.querySelectorAll('.unit-card:not(.unit-card--keeper)');
+            const replicaCoords = [];
+
+            replicaCards.forEach(card => {
+                const rect = card.getBoundingClientRect();
+                const rX = (rect.left + rect.width / 2) - schemeRect.left;
+                const rY = rect.top - schemeRect.top;
+
+                replicaCoords.push({ x: rX, y: rY, right: rect.right - schemeRect.left, left: rect.left - schemeRect.left });
+
+                // Пунктирная стрелка от Keeper к реплике
+                linesHTML += `
+                    <line x1="${kX}" y1="${kY}" x2="${rX}" y2="${rY - 6}" 
+                          stroke="#7a7a7a" stroke-width="1.5" stroke-dasharray="4,4" 
+                          marker-end="url(#arrow)" />
+                `;
+            });
+
+            // Двунаправленная линия репликации данных между соседними нодами
+            for (let i = 0; i < replicaCoords.length - 1; i++) {
+                const n1 = replicaCoords[i];
+                const n2 = replicaCoords[i + 1];
+                const y = n1.y + 40;
+                linesHTML += `
+                    <line x1="${n1.right + 4}" y1="${y}" x2="${n2.left - 4}" y2="${y}" 
+                          stroke="#0077ff" stroke-width="1.5" 
+                          marker-end="url(#arrow)" marker-start="url(#arrow)" />
+                `;
+            }
+
+            svgLines.innerHTML = linesHTML;
+        }
+
+        async function fetchTopology() {
+            try {
+                const res = await fetch('/api/v1/topology');
+                const list = await res.json();
+
+                let keeperHTML = '';
+                let replicasHTML = '';
+
+                list.forEach(node => {
+                    if (node.role === 'KEEPER') {
+                        keeperHTML = createCard(node);
+                    } else {
+                        replicasHTML += createCard(node);
+                    }
+                });
+
+                document.getElementById('keeperSlot').innerHTML = keeperHTML;
+                document.getElementById('replicasSlot').innerHTML = replicasHTML;
+
+                // Перерисовываем стрелки после рендера карточек
+                requestAnimationFrame(drawConnections);
+            } catch (err) {
+                console.error('Ошибка опроса API:', err);
+            }
+        }
+
+        window.addEventListener('resize', drawConnections);
+        setInterval(fetchTopology, 1000);
+        fetchTopology();
+    </script>
+</body>
+</html>
